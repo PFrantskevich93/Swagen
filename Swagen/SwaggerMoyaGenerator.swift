@@ -82,7 +82,7 @@ class SwaggerMoyaGenerator {
                 let sorted = ops.sorted(by: { $0.id < $1.id })
                 let defenition = apiDefenition(name: name, operations: sorted)
 
-                let text = "\(genFilePrefix)\nimport Moya\n\n\(defenition)\n"
+                let text = "\(genFilePrefix)\nimport Alamofire\n\n\(defenition)\n"
                 try text.data(using: .utf8)?.write(to: fileURL)
             }
         } catch {
@@ -103,9 +103,7 @@ class SwaggerMoyaGenerator {
         strings.append("")
         
         // Paths
-        strings.append("extension \(name): TargetType {")
-        strings.append("\(indent)\(genAccessLevel) var baseURL: URL { return URL(string: \"\(processor.baseURL.absoluteString)\")! }")
-        strings.append("")
+        strings.append("extension \(name): ApiController {")
         strings.append("\(indent)\(genAccessLevel) var path: String {")
         strings.append("\(indent)\(indent)switch self {")
         strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName): return \"\($0.path)\"" }))
@@ -114,99 +112,26 @@ class SwaggerMoyaGenerator {
         strings.append("")
         
         // RequestsneedParams
-        strings.append("\(indent)\(genAccessLevel) var headers: [String: String]? {")
+        strings.append("\(indent)\(genAccessLevel) var headers: HTTPHeaders? {")
         strings.append("\(indent)\(indent)switch self {")
-        strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseWithParams(position: [.header])):\(caseReturn) \($0.moyaTaskHeaders)" }))
+        strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseWithParams(position: [.header])):\(caseReturn) nil" }))
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
         strings.append("")
         
-        strings.append("\(indent)\(genAccessLevel) var method: Moya.Method {")
+        strings.append("\(indent)\(genAccessLevel) var method: HTTPMethod {")
         strings.append("\(indent)\(indent)switch self {")
         strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName): return .\($0.method.lowercased())" }))
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
         strings.append("")
         
-        strings.append("\(indent)\(genAccessLevel) var task: Moya.Task {")
+        strings.append("\(indent)\(genAccessLevel) var encoding: ParameterEncoding {")
         strings.append("\(indent)\(indent)switch self {")
         strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseWithParams(position: [.body, .query, .formData])):\(caseReturn) \($0.moyaTask)" }))
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
-        strings.append("")
-        
-        strings.append("\(indent)\(genAccessLevel) var sampleData: Data { return Data() }")
         strings.append("}")
-
-        // Authorization
-        if options.contains(.customAuthorization) {
-            strings.append("")
-            strings.append("// MARK: - Authorization")
-            strings.append("")
-            strings.append("extension \(name): AccessTokenAuthorizable {")
-            strings.append("\(indent)\(genAccessLevel) var authorizationType: Moya.AuthorizationType {")
-            strings.append("\(indent)\(indent)switch self {")
-            strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName): return \($0.moyaTaskAuth)" }))
-            strings.append("\(indent)\(indent)}")
-            strings.append("\(indent)}")
-            strings.append("}")
-        }
-
-        // Responses
-        if options.contains(.responseTypes) {
-            strings.append("")
-            strings.append("// MARK: - Response Parsing")
-            strings.append("")
-            strings.append("extension \(name): TargetTypeResponse {")
-            strings.append("\(indent)\(genAccessLevel) func decodeResponse(_ response: Moya.Response) throws -> Any {")
-            strings.append("\(indent)\(indent)switch self {")
-            strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName):\n\($0.moyaResponseDecoder(responseName: "response", indentLevel: 3))" }))
-            strings.append("\(indent)\(indent)}")
-            strings.append("\(indent)}")
-            strings.append("}")
-        }
-
-        // Responses
-        if options.contains(.moyaProvider) {
-            strings.append("")
-            strings.append("// MARK: - Sync Requests")
-            strings.append("")
-            strings.append("extension Server where Target == \(name) {")
-            let ops: [String] = operations.map { op -> String in
-                var subs: [String] = []
-                subs.append("\(indent)\(genAccessLevel) func \(op.funcDeclaration) throws -> \(op.firstSuccessResponseType) {")
-                subs.append("\(indent)\(indent)return try self.response(.\(op.caseUsage))")
-                subs.append("\(indent)}")
-                return subs.joined(separator: "\n")
-            }
-            strings.append(ops.joined(separator: "\n\n"))
-            strings.append("}")
-        }
-
-        // Responses
-        if options.contains(.moyaProvider) {
-            strings.append("")
-            strings.append("// MARK: - Async Requests")
-            strings.append("")
-            strings.append("extension Server where Target == \(name) {")
-            let ops: [String] = operations.map { op -> String in
-                let declaration: String
-                if op.parameters.isEmpty {
-                    declaration = String(op.funcDeclaration.dropLast()) + "completion: @escaping (Result<\(op.firstSuccessResponseType), ServerError>) -> Void)"
-                } else {
-                    declaration = String(op.funcDeclaration.dropLast()) + ", completion: @escaping (Result<\(op.firstSuccessResponseType), ServerError>) -> Void)"
-                }
-                var subs: [String] = []
-                subs.append("\(indent)@discardableResult")
-                subs.append("\(indent)\(genAccessLevel) func \(declaration) -> Moya.Cancellable {")
-                subs.append("\(indent)\(indent)return self.request(.\(op.caseUsage), completion: completion)")
-                subs.append("\(indent)}")
-                return subs.joined(separator: "\n")
-            }
-            strings.append(ops.joined(separator: "\n\n"))
-            strings.append("}")
-        }
-
 
         return strings.joined(separator: "\n")
     }

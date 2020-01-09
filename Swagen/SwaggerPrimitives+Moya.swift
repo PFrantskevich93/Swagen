@@ -81,21 +81,14 @@ extension Operation {
         let query = parameters.filter { $0.in == .query }
         let form = parameters.filter { $0.in == .formData }
 
-        let queryHasOpt = query.contains(where: { $0.required == false })
-        let bodyHasOpt = body.contains(where: { $0.required == false })
-
-        let urlParams = query.isEmpty ? "[:]" : "[\(query.map({ "\"\($0.nameSwiftString)\": \($0.nameSwiftString)" }).joined(separator: ", "))]\(queryHasOpt ? ".unopt()" : "")"
-        let bodyParams = body.isEmpty ? "[:]" : "[\(body.map({ "\"\($0.name)\": \($0.name)" }).joined(separator: ", "))]\(bodyHasOpt ? ".unopt()" : "")"
-        let formParams = form.isEmpty ? "[]" : "[\(form.map({ $0.moyaFormDataString }).joined(separator: ", "))].compactMap({ $0 })"
-
         if form.isEmpty == false {
-            return ".uploadCompositeMultipart(\(formParams), urlParameters: \(urlParams))"
+            return "JSONEncoding.default"
         } else if body.isEmpty && query.isEmpty {
-            return ".requestPlain"
+            return "JSONEncoding.default"
         } else if body.count == 1, query.isEmpty {
-            return ".requestJSONEncodable(\(body[0].name))"
+            return "JSONEncoding.default"
         } else {
-            return ".requestCompositeParameters(bodyParameters: \(bodyParams), bodyEncoding: JSONEncoding(), urlParameters: \(urlParams))"
+            return "URLEncoding.default"
         }
     }
 
