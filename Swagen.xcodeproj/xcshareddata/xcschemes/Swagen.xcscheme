@@ -52,7 +52,7 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "https://api-im-public-stage1.synesis-sport.com/v2/api-docs ./output"
+            argument = "http://134.17.27.74:8361/v2/api-docs?group=mobile ./output"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument

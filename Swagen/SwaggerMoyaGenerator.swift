@@ -61,6 +61,9 @@ class SwaggerMoyaGenerator {
 
             let utilsURL = outputFolder.appendingPathComponent("Utils.swift")
             try? FileManager.default.removeItem(at: utilsURL)
+            
+            let apiControllerURL = outputFolder.appendingPathComponent("ApiController.swift")
+            try? FileManager.default.removeItem(at: apiControllerURL)
 
             if options.contains(.moyaProvider) {
                 let fileURL = outputFolder.appendingPathComponent("Server.swift")
@@ -72,8 +75,11 @@ class SwaggerMoyaGenerator {
             if options.contains(.responseTypes) {
                 utilsStings.append(contentsOf: targetTypeResponseCode)
             }
+            
+            let apiStrings = apiControllerFile
 
             try utilsStings.data(using: .utf8)?.write(to: utilsURL)
+            try apiStrings.data(using: .utf8)?.write(to: apiControllerURL)
         
             for (tag, ops) in processor.operationsByTag {
                 let name = tag.capitalized.replacingOccurrences(of: "-", with: "") + "API"
@@ -82,7 +88,7 @@ class SwaggerMoyaGenerator {
                 let sorted = ops.sorted(by: { $0.id < $1.id })
                 let defenition = apiDefenition(name: name, operations: sorted)
 
-                let text = "\(genFilePrefix)\nimport Alamofire\n\n\(defenition)\n"
+                let text = "\(genFilePrefix)\nimport Alamofire\n\n\(defenition)"
                 try text.data(using: .utf8)?.write(to: fileURL)
             }
         } catch {
@@ -106,7 +112,21 @@ class SwaggerMoyaGenerator {
         strings.append("extension \(name): ApiController {")
         strings.append("\(indent)\(genAccessLevel) var path: String {")
         strings.append("\(indent)\(indent)switch self {")
-        strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName): return \"\($0.path)\"" }))
+        strings.append(contentsOf: operations.map({
+            var string = "\(indent)\(indent)case .\($0.caseWithParams(position: [.path]))"
+            string += ": return "
+            string += "\""
+            var path = $0.path
+            let params = $0.sortedParameters.filter { $0.in == .path }
+            for param in params {
+                path =  path.replacingOccurrences(of: "{\(param.nameSwiftString)}", with: "\\(\(param.nameSwiftString))")
+            }
+            string += path
+            string += "\""
+            
+           return string
+            
+        }))
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
         strings.append("")
@@ -126,9 +146,30 @@ class SwaggerMoyaGenerator {
         strings.append("\(indent)}")
         strings.append("")
         
+        strings.append("\(indent)\(genAccessLevel) var parameters: [String: Any]? {")
+        strings.append("\(indent)\(indent)switch self {")
+        strings.append(contentsOf: operations.map({
+            var str = "\(indent)\(indent)case .\($0.caseWithParams(position: [.body, .query, .formData])):"
+            if $0.sortedParameters.contains(where: { (operation) -> Bool in return operation.in == .body }) {
+                str += "\(caseReturn) req.dictionary"
+            } else if $0.sortedParameters.contains(where: { (operation) -> Bool in return operation.in == .query }) {
+                 str += "\n             var params = [String: Any]()"
+                for operation in $0.sortedParameters.filter({ $0.in == .query }) {
+                    str += "\n             params[\"\(operation.nameSwiftString)\"] = \(operation.nameSwiftString)"
+                }
+                str += "\n            \(caseReturn) params"
+            } else {
+                str += "\(caseReturn) nil"
+            }
+            return str
+        }))
+        strings.append("\(indent)\(indent)}")
+        strings.append("\(indent)}")
+        strings.append("")
+        
         strings.append("\(indent)\(genAccessLevel) var encoding: ParameterEncoding {")
         strings.append("\(indent)\(indent)switch self {")
-        strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseWithParams(position: [.body, .query, .formData])):\(caseReturn) \($0.moyaTask)" }))
+        strings.append(contentsOf: operations.map({ "\(indent)\(indent)case .\($0.caseName):\(caseReturn) \($0.encoding)" }))
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
         strings.append("}")

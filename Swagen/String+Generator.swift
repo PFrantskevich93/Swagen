@@ -8,14 +8,18 @@
 
 import Foundation
 
-let reserverWords = ["Type", "Self", "self", "Codable", "default"]
+let reserverWords = ["Type", "Self", "self", "Codable", "default", "continue"]
 let indent = "    "
 var genAccessLevel = "public"
 
-
 extension String {
     var escaped: String {
-        var result = self.filter { $0.isLetter || $0.isNumber || $0 == "_" }
+        var strings = self.split(separator: " ")
+        if let string = strings.first, let number = Int(string){
+            strings.removeFirst()
+        }
+        let newString = strings.joined()
+        var result = newString.filter { $0.isLetter || $0.isNumber || $0 == "_" }
         result = reserverWords.contains(result) ? "`\(result)`" : result
         return result
     }
@@ -40,11 +44,23 @@ let genFilePrefix =
 import Foundation
 """
 
+let apiControllerFile =
+"""
+import Alamofire
+import Foundation
+
+public protocol ApiController {
+    var path: String { get }
+    var parameters: [String: Any]? { get }
+    var method: HTTPMethod { get }
+    var encoding: ParameterEncoding { get }
+    var headers: HTTPHeaders? { get }
+}
+"""
 
 let utilsFile =
 """
 \(genFilePrefix)
-import Moya
 
 extension Dictionary where Value == Any? {
     func unopt() -> [Key: Any] {
@@ -76,6 +92,18 @@ extension JSONDecoder {
                 throw DecodingError.dataCorrupted(context)
             }
         }
+    }
+}
+
+extension Encodable {
+internal var dictionary: [String: Any]? {
+    guard let data = try? JSONEncoder().encode(self) else {
+        return nil
+    }
+    
+    let dictionary = (try? JSONSerialization.jsonObject(with: data,
+                                                        options: .allowFragments)).flatMap { $0 as? [String: Any] }
+    return dictionary
     }
 }
 
@@ -125,21 +153,6 @@ extension JSONDecoder {
         }
     }
 }
-
-\(genAccessLevel) enum FileValue {
-    case data(value: Foundation.Data, fileName: String, mimeType: String)
-    case url(value: Foundation.URL)
-
-    func moyaFormData(name: String) -> MultipartFormData {
-        switch self {
-        case .data(let value, let fileName, let mimeType):
-            return MultipartFormData(provider: .data(value), name: name, fileName: fileName, mimeType: mimeType)
-        case .url(let value):
-            return MultipartFormData(provider: .file(value), name: name)
-        }
-    }
-}
-
 """
 
 
@@ -153,7 +166,6 @@ let targetTypeResponseCode =
 \(genAccessLevel) protocol TargetTypeResponse: TargetType {
     func decodeResponse(_ response: Moya.Response) throws -> Any
 }
-
 """
 
 
@@ -296,5 +308,4 @@ final \(genAccessLevel) class Server<Target: TargetType>: MoyaProvider<Target> {
         return try result.mapError(responseErrorMapper).get()
     }
 }
-
 """

@@ -8,17 +8,6 @@
 
 import Foundation
 
-extension AuthorizationType {
-    var moyaString: String {
-        switch self {
-        case .none: return ".none"
-        case .basic: return ".basic"
-        case .bearer: return ".bearer"
-        case .custom: return ".custom(\"\")"
-        }
-    }
-}
-
 extension PropertyObject {
     var moyaFormDataString: String {
         let dataString: String
@@ -36,6 +25,10 @@ extension PropertyObject {
 extension Operation {
     var caseName: String {
         return id.loweredFirstLetter.escaped
+    }
+    
+    var pathComponent: Bool {
+        return parameters.filter { $0.in == .path }.isEmpty == false
     }
 
     var caseDocumetation: String {
@@ -76,7 +69,12 @@ extension Operation {
         return needParams == false ? caseName : "\(caseName)(\(sortedParameters.map({ position.contains($0.in) ? "let \($0.nameSwiftString)" : "_" }).joined(separator: ", ")))"
     }
     
-    var moyaTask: String {
+    var needParams: Bool {
+        return parameters.isEmpty == false
+    }
+        
+    
+    var encoding: String {
         let body = parameters.filter { $0.in == .body }
         let query = parameters.filter { $0.in == .query }
         let form = parameters.filter { $0.in == .formData }
@@ -101,41 +99,11 @@ extension Operation {
         return headerStrings.isEmpty ? "nil" : "Dictionary<String, Any?>(dictionaryLiteral: \(headerStrings.joined(separator: ", "))).unoptString()"
     }
 
-    var moyaTaskAuth: String {
-        return (hasAuthorization ? AuthorizationType.custom : AuthorizationType.none).moyaString
-    }
-
     var firstSuccessResponseType: String {
         if let key = responses.keys.sorted().first, let primitive = responses[key]?.primitive {
             return primitive.typeSwiftString
         } else {
             return "Void"
         }
-    }
-
-    func moyaResponseDecoder(responseName: String, indentLevel: Int = 2) -> String {
-        let primitives = responses.reduce(into: [String: PrimitiveObject]()) { (result, kv) in
-            result[kv.key] = kv.value.primitive
-        }
-
-        let keys = primitives.keys.sorted()
-
-        var baseIndent = ""
-        for _ in 0..<indentLevel { baseIndent += indent }
-
-        var strings: [String] = []
-        strings.append("\(baseIndent)switch \(responseName).statusCode {")
-        for key in keys {
-            let primitive = primitives[key]!
-            if primitive.type == .none {
-                strings.append("\(baseIndent)case \(key): return Void()")
-            } else {
-                strings.append("\(baseIndent)case \(key): return try JSONDecoder().decodeSafe(\(primitive.typeSwiftString).self, from: \(responseName).data)")
-            }
-        }
-        strings.append("\(baseIndent)default: throw ResponseDecodeError.unknowCode")
-        strings.append("\(baseIndent)}")
-
-        return strings.joined(separator: "\n")
     }
 }
