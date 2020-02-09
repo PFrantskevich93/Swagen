@@ -32,6 +32,7 @@ enum ParameterFormat: String {
     case double
     case int32
     case int64
+    case date
 }
 
 enum AuthorizationType {
@@ -82,11 +83,11 @@ class Operation: CustomStringConvertible {
 }
 
 class OperationParameter: PropertyObject {
-    let descriptionText: String
+    let descriptionText: String?
     let `in`: ParameterPosition
 
     init(info: [String: Any], processor: SwaggerProcessor) {
-        self.descriptionText = info["description"] as! String
+        self.descriptionText = info["description"] as? String
         self.in = ParameterPosition(rawValue: info["in"] as! String)!
         
         let name = info["name"] as! String

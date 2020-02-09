@@ -30,6 +30,7 @@ extension ParameterFormat {
         case .double: return "Double"
         case .int32: return "Int32"
         case .int64: return "Int64"
+        case .date: return "Date"
         }
     }
 }

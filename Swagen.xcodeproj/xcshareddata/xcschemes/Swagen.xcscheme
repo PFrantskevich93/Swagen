@@ -52,7 +52,7 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "http://134.17.27.74:8361/v2/api-docs?group=mobile ./output"
+            argument = "http://134.17.27.74:8361/v2/api-docs ./output"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument

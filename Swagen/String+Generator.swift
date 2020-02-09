@@ -153,6 +153,17 @@ internal var dictionary: [String: Any]? {
         }
     }
 }
+
+public struct FileValue {
+    public let data: Foundation.Data
+    public let fileName: String = UUID().uuidString
+    public let mimeType: String
+    
+    public init(data: Foundation.Data, mimeType: String) {
+        self.data = data
+        self.mimeType = mimeType
+    }
+}
 """
 
 
@@ -172,140 +183,147 @@ let targetTypeResponseCode =
 let serverFile =
 """
 \(genFilePrefix)
-import Moya
+import Alamofire
 
-fileprivate let callbackQueue = DispatchQueue(label: "network.callback.queue")
+public final class Server<Target: ApiController> {
+    private let baseURL: URL
+    private let sessionManager: AuthorizedSessionManager
 
-\(genAccessLevel) enum ServerError: Error {
-    case invalidResponseCode(_: Int, _: Data)
-    case connection(_: Error)
-    case decoding(_: Error)
-    case unknown(_: Error)
-}
-
-final \(genAccessLevel) class Server<Target: TargetType>: MoyaProvider<Target> {
-    let baseURL: URL
-    let responseErrorMapper: (ServerError) -> Error
-
-    \(genAccessLevel) init(baseURL: URL, accessToken: String? = nil, responseErrorMapper: @escaping (ServerError) -> Error = { $0 }) {
+    public init(baseURL: URL, accessToken: String?) {
         self.baseURL = baseURL
-        self.responseErrorMapper = responseErrorMapper
-        var plugins: [PluginType] = []
-
-        if ProcessInfo.processInfo.environment["NETWORK_LOGS"] != nil {
-            plugins.append(NetworkLoggerPlugin(verbose: true))
-        }
-
-        if let accessToken = accessToken {
-            plugins.append(AccessTokenPlugin(tokenClosure: { accessToken }))
-        }
-
-        super.init(endpointClosure: { target -> Endpoint in
-            let url: URL
-            if target.path.hasPrefix("/") {
-                url = baseURL.appendingPathComponent(String(target.path.dropFirst()))
-            } else {
-                url = baseURL.appendingPathComponent(target.path)
-            }
-
-            return Endpoint(
-                url: url.absoluteString,
-                sampleResponseClosure: { .networkResponse(200, target.sampleData) },
-                method: target.method,
-                task: target.task,
-                httpHeaderFields: target.headers
-            )
-        }, callbackQueue: callbackQueue, plugins: plugins)
+        self.sessionManager = AuthorizedSessionManager(accessToken: accessToken)
     }
 
     // MARK: - Async requests
 
     @discardableResult
-    \(genAccessLevel) func request(_ target: Target, callbackQueue: DispatchQueue? = .none, progress: ProgressBlock? = .none, completion: @escaping (Result<Void, ServerError>) -> Void) -> Moya.Cancellable {
-
-        return super.request(target, callbackQueue: callbackQueue, progress: progress) { responseResult in
-            let result = Result<Void, Error> {
-                let response = try responseResult.get()
-                guard response.statusCode >= 200, response.statusCode < 300 else {
-                    throw ServerError.invalidResponseCode(response.statusCode, response.data)
-                }
-                return Void()
-            }
-
-            completion(result.mapError { (error: Error) -> ServerError in
-                if let error = error as? MoyaError, case .underlying(let underlying, _) = error {
-                    if (underlying as NSError).domain == NSURLErrorDomain {
-                        return ServerError.connection(underlying)
-                    } else {
-                        return ServerError.unknown(underlying)
+    public func request<DataType: Decodable>(_ target: Target,
+                                               callbackQueue: DispatchQueue? = .none,
+                                               completion: @escaping (Swift.Result<DataType, Error>) -> Void) -> Request {
+        let url = baseURL.appendingPathComponent(target.path)
+        return sessionManager.request(url,
+                                      method: target.method,
+                                      parameters: target.parameters,
+                                      encoding: target.encoding,
+                                      headers: target.headers).validate(statusCode: 200...299).responseJSON { (response) in
+            print(response)
+            let result = Swift.Result<DataType, Error> {
+                switch response.result {
+                case .success:
+                    do {
+                        // swiftlint:disable force_unwrapping
+                        if response.response?.statusCode == 204 {
+                            return try JSONDecoder().decodeSafe(DataType.self, from: "{}".data(using: .utf16)!)
+                        }
+                        return try JSONDecoder().decodeSafe(DataType.self, from: response.data!)
+                    } catch {
+                        throw error
                     }
-                } else if let error = error as? ServerError {
-                    return error
-                } else {
-                    return ServerError.unknown(error)
+                case .failure(let error):
+                    throw error
                 }
-            })
+            }
+            completion(result)
         }
     }
 
-    @discardableResult
-    \(genAccessLevel) func request<DataType: Decodable>(_ target: Target, callbackQueue: DispatchQueue? = .none, progress: ProgressBlock? = .none, completion: @escaping (Result<DataType, ServerError>) -> Void) -> Moya.Cancellable {
-
-        return super.request(target, callbackQueue: callbackQueue, progress: progress) { responseResult in
-            let result = Result<DataType, Error> {
-                let response = try responseResult.get()
-                guard response.statusCode >= 200, response.statusCode < 300 else {
-                    throw ServerError.invalidResponseCode(response.statusCode, response.data)
-                }
-                do {
-                    return try JSONDecoder().decodeSafe(DataType.self, from: response.data)
-                } catch {
-                    throw ServerError.decoding(error)
-                }
-            }
-
-            completion(result.mapError { (error: Error) -> ServerError in
-                if let error = error as? MoyaError, case .underlying(let underlying, _) = error {
-                    if (underlying as NSError).domain == NSURLErrorDomain {
-                        return ServerError.connection(underlying)
-                    } else {
-                        return ServerError.unknown(underlying)
-                    }
-                } else if let error = error as? ServerError {
-                    return error
-                } else {
-                    return ServerError.unknown(error)
-                }
-            })
-        }
-    }
-
-    // MARK: - Sync requests
-
-    \(genAccessLevel) func response(_ target: Target, callbackQueue: DispatchQueue? = .none, progress: ProgressBlock? = .none) throws {
+    // MARK: - Sync request
+    public func response<DataType: Decodable>(_ target: Target, callbackQueue: DispatchQueue? = .none) throws -> DataType {
         assert(Thread.isMainThread == false)
 
-        var result: Result<Void, ServerError>!
+        var result: Swift.Result<DataType, Error>!
         let semaphore = DispatchSemaphore(value: 0)
-        self.request(target, callbackQueue: callbackQueue, progress: progress) { (response: Result<Void, ServerError>) in
+        self.request(target, callbackQueue: callbackQueue) { (response: Swift.Result<DataType, Error>) in
             result = response
             semaphore.signal()
         }
         semaphore.wait()
-        return try result.mapError(responseErrorMapper).get()
+        return try result.get()
     }
+    
+    // MARK: - Async upload
 
-    \(genAccessLevel) func response<DataType: Decodable>(_ target: Target, callbackQueue: DispatchQueue? = .none, progress: ProgressBlock? = .none) throws -> DataType {
+    public func uploadRequest<DataType: Decodable>(_ target: Target,
+                                              file: FileValue,
+                                              callbackQueue: DispatchQueue? = .none,
+                                              completion: @escaping (Swift.Result<DataType, Error>) -> Void) {
+        let url = baseURL.appendingPathComponent(target.path)
+        sessionManager.upload(multipartFormData: { (multipartFormData) in
+            multipartFormData.append(file.data, withName: "file", fileName: file.fileName, mimeType: file.mimeType)
+        }, to: url, method: target.method, headers: target.headers) { uploadResult in
+            switch uploadResult {
+            case .success(let request, _, _):
+                request.responseJSON { (response) in
+                    let result = Swift.Result<DataType, Error> {
+                        switch response.result {
+                        case .success:
+                            do {
+                                // swiftlint:disable force_unwrapping
+                                if response.response?.statusCode == 204 {
+                                    return try JSONDecoder().decodeSafe(DataType.self, from: "{}".data(using: .utf16)!)
+                                }
+                                return try JSONDecoder().decodeSafe(DataType.self, from: response.data!)
+                            } catch {
+                                throw error
+                            }
+                        case .failure(let error):
+                            throw error
+                        }
+                    }
+                    completion(result)
+                }
+            case .failure(let error):
+                let result = Swift.Result<DataType, Error> {
+                    throw error
+                }
+                completion(result)
+            }
+        }
+    }
+    
+    // MARK: - Sync upload
+    public func upload<DataType: Decodable>(_ target: Target, file: FileValue, callbackQueue: DispatchQueue? = .none) throws -> DataType {
         assert(Thread.isMainThread == false)
 
-        var result: Result<DataType, ServerError>!
+        var result: Swift.Result<DataType, Error>!
         let semaphore = DispatchSemaphore(value: 0)
-        self.request(target, callbackQueue: callbackQueue, progress: progress) { (response: Result<DataType, ServerError>) in
+        self.uploadRequest(target, file: file) { (response: Swift.Result<DataType, Error>) in
             result = response
             semaphore.signal()
         }
         semaphore.wait()
-        return try result.mapError(responseErrorMapper).get()
+        return try result.get()
+    }
+}
+
+private enum TimeOutIntervals: Double {
+    case `default` = 45.0
+}
+
+final class AuthorizedSessionManager: SessionManager {
+    init(accessToken: String?) {
+        let configuration: URLSessionConfiguration = .default
+        configuration.httpAdditionalHeaders = SessionManager.defaultHTTPHeaders
+        configuration.timeoutIntervalForRequest = TimeOutIntervals.default.rawValue
+
+        super.init(configuration: configuration)
+        self.adapter = AuthorizedHeadersAdapter(accessToken: accessToken)
+    }
+}
+
+final class AuthorizedHeadersAdapter: RequestAdapter {
+    private let accessToken: String?
+
+    init(accessToken: String?) {
+        self.accessToken = accessToken
+    }
+
+    func adapt(_ urlRequest: URLRequest) throws -> URLRequest {
+        var urlRequest = urlRequest
+        if let token = accessToken {
+            urlRequest.setValue(token, forHTTPHeaderField: "Authorization")
+        }
+        return urlRequest
     }
 }
 """

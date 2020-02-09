@@ -65,11 +65,8 @@ class SwaggerMoyaGenerator {
             let apiControllerURL = outputFolder.appendingPathComponent("ApiController.swift")
             try? FileManager.default.removeItem(at: apiControllerURL)
 
-            if options.contains(.moyaProvider) {
-                let fileURL = outputFolder.appendingPathComponent("Server.swift")
-                try? FileManager.default.removeItem(at: fileURL)
-                try serverFile.data(using: .utf8)?.write(to: fileURL)
-            }
+            let fileURL = outputFolder.appendingPathComponent("Server.swift")
+            try? FileManager.default.removeItem(at: fileURL)
 
             var utilsStings = utilsFile
             if options.contains(.responseTypes) {
@@ -77,7 +74,8 @@ class SwaggerMoyaGenerator {
             }
             
             let apiStrings = apiControllerFile
-
+            
+            try serverFile.data(using: .utf8)?.write(to: fileURL)
             try utilsStings.data(using: .utf8)?.write(to: utilsURL)
             try apiStrings.data(using: .utf8)?.write(to: apiControllerURL)
         
@@ -173,6 +171,99 @@ class SwaggerMoyaGenerator {
         strings.append("\(indent)\(indent)}")
         strings.append("\(indent)}")
         strings.append("}")
+        
+        // Responses
+            strings.append("")
+            strings.append("// MARK: - Sync Requests")
+            strings.append("")
+            strings.append("extension Server where Target == \(name) {")
+            var ops: [String] = operations.map { op -> String in
+                let formParams = op.parameters.filter { params -> Bool in
+                    params.propertyTypeSwiftString == "FileValue"
+                }
+                guard formParams.isEmpty else  { return "" }
+                var subs: [String] = []
+                subs.append("\(indent)\(genAccessLevel) func \(op.funcDeclaration) throws -> \(op.firstSuccessResponseType) {")
+                subs.append("\(indent)\(indent)return try self.response(.\(op.caseUsage))")
+                subs.append("\(indent)}")
+                return subs.joined(separator: "\n")
+            }
+            strings.append(ops.joined(separator: "\n\n"))
+            strings.append("}")
+
+        // Responses
+            strings.append("")
+            strings.append("// MARK: - Async Requests")
+            strings.append("")
+            strings.append("extension Server where Target == \(name) {")
+            ops = operations.map { op -> String in
+                let formParams = op.parameters.filter { params -> Bool in
+                    params.propertyTypeSwiftString == "FileValue"
+                }
+                guard formParams.isEmpty else  { return "" }
+                let declaration: String
+                if op.parameters.isEmpty {
+                    declaration = String(op.funcDeclaration.dropLast()) + "completion: @escaping (Swift.Result<\(op.firstSuccessResponseType), Error>) -> Void)"
+                } else {
+                    declaration = String(op.funcDeclaration.dropLast()) + ", completion: @escaping (Swift.Result<\(op.firstSuccessResponseType), Error>) -> Void)"
+                }
+                var subs: [String] = []
+                subs.append("\(indent)@discardableResult")
+                subs.append("\(indent)\(genAccessLevel) func \(declaration) -> Request {")
+                subs.append("\(indent)\(indent)return self.request(.\(op.caseUsage), completion: completion)")
+                subs.append("\(indent)}")
+                return subs.joined(separator: "\n")
+            }
+            strings.append(ops.joined(separator: "\n\n"))
+            strings.append("}")
+        
+        
+        
+        // Responses
+        strings.append("")
+        strings.append("// MARK: - Sync Upload")
+        strings.append("")
+        strings.append("extension Server where Target == \(name) {")
+        ops = operations.map { op -> String in
+            let fileType = op.sortedParameters.first { opp -> Bool in
+                opp.propertyTypeSwiftString == "FileValue"
+            }
+            guard let file = fileType else { return "" }
+            var subs: [String] = []
+            subs.append("\(indent)\(genAccessLevel) func \(op.funcDeclaration) throws -> \(op.firstSuccessResponseType) {")
+            
+            subs.append("\(indent)\(indent)return try self.upload(.\(op.caseUsage), file: \(file.nameSwiftString))")
+            subs.append("\(indent)}")
+            return subs.joined(separator: "\n")
+        }
+        strings.append(ops.joined(separator: "\n\n"))
+        strings.append("}")
+        
+        // Responses
+        strings.append("")
+        strings.append("// MARK: - Async Upload")
+        strings.append("")
+        strings.append("extension Server where Target == \(name) {")
+        ops = operations.map { op -> String in
+            let fileType = op.sortedParameters.first { opp -> Bool in
+                opp.propertyTypeSwiftString == "FileValue"
+            }
+            guard let file = fileType else { return "" }
+            let declaration: String
+            if op.parameters.isEmpty {
+                declaration = String(op.funcDeclaration.dropLast()) + "completion: @escaping (Swift.Result<\(op.firstSuccessResponseType), Error>) -> Void)"
+            } else {
+                declaration = String(op.funcDeclaration.dropLast()) + ", completion: @escaping (Swift.Result<\(op.firstSuccessResponseType), Error>) -> Void)"
+            }
+            var subs: [String] = []
+            subs.append("\(indent)\(genAccessLevel) func \(declaration) {")
+            subs.append("\(indent)\(indent) self.uploadRequest(.\(op.caseUsage), file: \(file.nameSwiftString), completion: completion)")
+            subs.append("\(indent)}")
+            return subs.joined(separator: "\n")
+        }
+        strings.append(ops.joined(separator: "\n\n"))
+        strings.append("}")
+
 
         return strings.joined(separator: "\n")
     }
